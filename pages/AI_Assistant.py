@@ -1,140 +1,107 @@
 import streamlit as st
 import pandas as pd
-import requests
-import os
 
-st.set_page_config(page_title="AI Assistant", layout="wide")
+st.set_page_config(page_title="AI Health Assistant")
 
-st.title("🤖 Aero Guardian AI Health Assistant")
+st.title("🤖 Aero Guardian – AI Health Assistant")
 
-# =============================
-# USER SETTINGS
-# =============================
-profile = st.sidebar.selectbox("User Profile", ["Adult", "Child", "Elderly"])
-exposure_time = st.sidebar.slider("Exposure Time (minutes)", 0, 120, 30)
-
-# =============================
-# LOAD DATA
-# =============================
-try:
-    df = pd.read_csv("pollution.csv")
-except:
-    df = pd.DataFrame()
-
-avg_pm = df["pm25"].mean() if not df.empty else 150
-
-# =============================
-# OPENROUTER SETUP
-# =============================
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
-
-# =============================
-# STRUCTURED RECOMMENDATION
-# =============================
-def structured_recommendation(pm25, profile, exposure):
-
-    cigarette_equivalent = round(pm25 / 22, 1)
-
-    recommendation = f"""
----
-
-## 📊 Air Quality Assessment
-
-**PM2.5 Level:** {round(pm25,2)}
-
-**Cigarette Equivalent:** ≈ {cigarette_equivalent} cigarettes/day
-
----
-
-## 🏥 Health Risk Analysis
-"""
-
-    if pm25 < 100:
-        recommendation += "Air quality is acceptable with minor sensitivity risk.\n"
-    elif pm25 < 200:
-        recommendation += "Unhealthy for sensitive groups.\n"
-    elif pm25 < 300:
-        recommendation += "Very unhealthy. Reduce outdoor exposure.\n"
-    else:
-        recommendation += "Hazardous. Avoid outdoor activity.\n"
-
-    recommendation += f"""
-
----
-
-## 😷 Mask Recommendation
-Use N95 or KN95 mask.
-
-## 🏠 Ventilation Advice
-Keep windows closed during peak pollution hours.
-
-## 🚶 Outdoor Advice
-Limit outdoor activity to {max(10, 60-exposure)} minutes.
-
-## 🛣 Route Intelligence
-Prefer low traffic routes and green corridors.
-
----
-"""
-
-    return recommendation
-
-# =============================
-# AI CALL
-# =============================
-def ask_ai(question):
-
-    if not OPENROUTER_KEY:
-        return "OpenRouter API key not found."
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
-        "HTTP-Referer": "http://localhost:8501",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "openai/gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": "You are an environmental health expert."},
-            {"role": "user", "content": question}
-        ]
-    }
-
+# -------- Load Latest Pollution Data --------
+def load_data():
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=data
-        )
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        df = pd.read_csv("dashboard.csv")
+        latest = df.groupby("city").tail(1)
+        return latest
     except:
-        return "AI Error occurred."
+        return None
 
-# =============================
-# CHAT SESSION
-# =============================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# -------- AI Health Logic --------
+def generate_response(pm25):
+    if pm25 > 300:
+        level = "🚨 Hazardous"
+        mask = "Use N95 or KN95 mask."
+        ventilation = "Keep windows closed."
+        outdoor = "Avoid outdoor activity."
+        route = "Avoid high-traffic routes."
+    elif pm25 > 200:
+        level = "⚠️ Very Unhealthy"
+        mask = "Use N95 mask outdoors."
+        ventilation = "Limit natural ventilation."
+        outdoor = "Limit outdoor exposure."
+        route = "Prefer low-traffic routes."
+    elif pm25 > 150:
+        level = "😷 Unhealthy"
+        mask = "Consider wearing a mask."
+        ventilation = "Avoid peak pollution hours."
+        outdoor = "Reduce prolonged exposure."
+        route = "Choose greener routes."
+    elif pm25 > 100:
+        level = "🌫 Moderate"
+        mask = "Sensitive groups should wear mask."
+        ventilation = "Ventilation acceptable."
+        outdoor = "Short outdoor activity allowed."
+        route = "Normal routes acceptable."
+    else:
+        level = "✅ Good"
+        mask = "Mask not required."
+        ventilation = "Safe ventilation."
+        outdoor = "Outdoor activity safe."
+        route = "All routes safe."
 
-user_input = st.chat_input("Ask about air quality, health, routes...")
+    return level, mask, ventilation, outdoor, route
 
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
 
-    with st.chat_message("user"):
-        st.markdown(user_input)
+data = load_data()
 
-    ai_reply = ask_ai(user_input)
+if data is None or data.empty:
+    st.warning("Waiting for live pollution data...")
+else:
+    st.subheader("📊 Current Air Quality Snapshot")
+    st.dataframe(data[["city", "pm25", "risk_level"]])
 
-    full_response = ai_reply + structured_recommendation(avg_pm, profile, exposure_time)
+    st.markdown("---")
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    st.subheader("💬 Ask a Question")
 
-    with st.chat_message("assistant"):
-        st.markdown(full_response)
+    user_question = st.text_input("Example: Is it safe in Delhi?")
+
+    if user_question:
+
+        question = user_question.lower()
+
+        if "delhi" in question:
+            city = "Delhi"
+        elif "mumbai" in question:
+            city = "Mumbai"
+        elif "kanpur" in question:
+            city = "Kanpur"
+        else:
+            city = data.iloc[0]["city"]
+
+        city_data = data[data["city"] == city]
+
+        if not city_data.empty:
+            pm25 = city_data.iloc[0]["pm25"]
+
+            level, mask, ventilation, outdoor, route = generate_response(pm25)
+
+            st.markdown("## 📍 AI Response")
+
+            st.write(f"**City:** {city}")
+            st.write(f"**PM2.5 Level:** {pm25}")
+            st.write(f"**Air Quality Status:** {level}")
+
+            st.markdown("### 😷 Mask Recommendation")
+            st.write(mask)
+
+            st.markdown("### 🏠 Ventilation Advice")
+            st.write(ventilation)
+
+            st.markdown("### 🚶 Outdoor Advice")
+            st.write(outdoor)
+
+            st.markdown("### 🛣 Route Intelligence")
+            st.write(route)
+
+        else:
+            st.error("City data not found.")
